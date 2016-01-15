@@ -16,21 +16,21 @@ import Severity from 'vs/base/common/severity';
 import winjs = require('vs/base/common/winjs.base');
 import ext = require('vs/workbench/common/contributions');
 import git = require('vs/workbench/parts/git/common/git');
-import workbenchEvents = require('vs/workbench/browser/events');
+import workbenchEvents = require('vs/workbench/common/events');
 import common = require('vs/editor/common/editorCommon');
 import widget = require('vs/editor/browser/widget/codeEditorWidget');
 import viewlet = require('vs/workbench/browser/viewlet');
 import statusbar = require('vs/workbench/browser/parts/statusbar/statusbar');
 import platform = require('vs/platform/platform');
 import widgets = require('vs/workbench/parts/git/browser/gitWidgets');
-import wbar = require('vs/workbench/browser/actionRegistry');
+import wbar = require('vs/workbench/common/actionRegistry');
 import gitoutput = require('vs/workbench/parts/git/browser/gitOutput');
 import output = require('vs/workbench/parts/output/common/output');
 import {SyncActionDescriptor} from 'vs/platform/actions/common/actions';
 import {EditorBrowserRegistry} from 'vs/editor/browser/editorBrowserExtensions';
 import confregistry = require('vs/platform/configuration/common/configurationRegistry');
 import quickopen = require('vs/workbench/browser/quickopen');
-import {IQuickOpenService} from 'vs/workbench/services/quickopen/browser/quickOpenService';
+import {IQuickOpenService} from 'vs/workbench/services/quickopen/common/quickOpenService';
 import editorcontrib = require('vs/workbench/parts/git/browser/gitEditorContributions');
 import {IActivityService, ProgressBadge, NumberBadge} from 'vs/workbench/services/activity/common/activityService';
 import {IEventService} from 'vs/platform/event/common/event';
@@ -144,8 +144,8 @@ class DirtyDiffModelDecorator {
 	private decorations: string[];
 	private firstRun: boolean;
 
-	private delayer: async.ThrottledDelayer;
-	private diffDelayer: async.ThrottledDelayer;
+	private delayer: async.ThrottledDelayer<void>;
+	private diffDelayer: async.ThrottledDelayer<void>;
 	private toDispose: lifecycle.IDisposable[];
 
 	constructor(model: common.IModel, path: string,
@@ -162,8 +162,8 @@ class DirtyDiffModelDecorator {
 		this.decorations = [];
 		this.firstRun = true;
 
-		this.delayer = new async.ThrottledDelayer(500);
-		this.diffDelayer = new async.ThrottledDelayer(200);
+		this.delayer = new async.ThrottledDelayer<void>(500);
+		this.diffDelayer = new async.ThrottledDelayer<void>(200);
 
 		this.toDispose = [];
 		this.toDispose.push(model.addListener2(common.EventType.ModelContentChanged, () => this.triggerDiff()));
@@ -196,7 +196,7 @@ class DirtyDiffModelDecorator {
 			.done(null, errors.onUnexpectedError);
 	}
 
-	private diffOriginalContents(): winjs.Promise {
+	private diffOriginalContents(): winjs.TPromise<void> {
 		return this.getOriginalContents()
 			.then(contents => {
 				if (!this.model || this.model.isDisposed()) {
@@ -224,6 +224,10 @@ class DirtyDiffModelDecorator {
 	}
 
 	private triggerDiff(): winjs.Promise {
+		if (!this.diffDelayer) {
+			return winjs.Promise.as(null);
+		}
+
 		return this.diffDelayer.trigger(() => {
 			if (!this.model || this.model.isDisposed()) {
 				return winjs.Promise.as([]); // disposed
@@ -290,8 +294,14 @@ class DirtyDiffModelDecorator {
 		}
 		this.model = null;
 		this.decorations = null;
-		this.delayer.cancel();
-		this.diffDelayer.cancel();
+		if (this.delayer) {
+			this.delayer.cancel();
+			this.delayer = null;
+		}
+		if (this.diffDelayer) {
+			this.diffDelayer.cancel();
+			this.diffDelayer = null;
+		}
 	}
 }
 
@@ -326,6 +336,7 @@ export class DirtyDiffDecorator implements ext.IWorkbenchContribution {
 		this.decorators = Object.create(null);
 		this.toDispose = [];
 		this.toDispose.push(eventService.addListener2(workbenchEvents.EventType.EDITOR_INPUT_CHANGED, () => this.onEditorInputChange()));
+		this.toDispose.push(gitService.addListener2(git.ServiceEvents.DISPOSE, () => this.dispose()));
 	}
 
 	public getId(): string {
@@ -396,6 +407,7 @@ export class DirtyDiffDecorator implements ext.IWorkbenchContribution {
 	}
 
 	public dispose(): void {
+		this.toDispose = lifecycle.disposeAll(this.toDispose);
 		this.models.forEach(m => this.decorators[m.id].dispose());
 		this.models = null;
 		this.decorators = null;
@@ -410,23 +422,6 @@ class OpenGitViewletAction extends viewlet.ToggleViewletAction {
 
 	constructor(id: string, label: string, @IViewletService viewletService: IViewletService, @IWorkbenchEditorService editorService: IWorkbenchEditorService) {
 		super(id, label, VIEWLET_ID, viewletService, editorService);
-	}
-}
-
-class GitCommandsAction extends actions.Action {
-
-	public static ID = 'workbench.action.git.executeGitCommands';
-	public static LABEL = nls.localize('executeGitCommands', "Execute Git Commands");
-	private quickOpenService: IQuickOpenService;
-
-	constructor(id: string, label: string, @IQuickOpenService quickOpenService: IQuickOpenService) {
-		super(id, label);
-		this.quickOpenService = quickOpenService;
-	}
-
-	public run(event?:any): winjs.Promise {
-		this.quickOpenService.show('git ');
-		return winjs.Promise.as(null);
 	}
 }
 
@@ -463,14 +458,10 @@ export function registerContributions(): void {
 		new SyncActionDescriptor(OpenGitViewletAction, OpenGitViewletAction.ID, OpenGitViewletAction.LABEL, {
 			primary: null,
 			win: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_G },
-			linux: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_G }
+			linux: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_G },
+			mac: { primary: KeyMod.WinCtrl | KeyMod.Shift | KeyCode.KEY_G }
 		}),
 		nls.localize('view', "View")
-	);
-
-	// Register Action for git quick open mode
-	(<wbar.IWorkbenchActionRegistry> platform.Registry.as(wbar.Extensions.WorkbenchActions)).registerWorkbenchAction(
-		new SyncActionDescriptor(GitCommandsAction, GitCommandsAction.ID, GitCommandsAction.LABEL)
 	);
 
 	// Register MergeDecorator

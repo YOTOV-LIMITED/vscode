@@ -5,10 +5,8 @@
 
 'use strict';
 
-import app = require('app');
+import {app, shell, dialog} from 'electron';
 import fs = require('fs');
-import dialog = require('dialog');
-import shell = require('shell');
 import nls = require('vs/nls');
 import {assign} from 'vs/base/common/objects';
 import platform = require('vs/base/common/platform');
@@ -23,6 +21,7 @@ import {getUserEnvironment} from 'vs/base/node/env';
 import {Promise, TPromise} from 'vs/base/common/winjs.base';
 import {GitAskpassService} from 'vs/workbench/parts/git/electron-main/askpassService';
 import {spawnSharedProcess} from 'vs/workbench/electron-main/sharedProcess';
+import {Mutex} from 'windows-mutex';
 
 export class LaunchService {
 	public start(args: env.ICommandLineArguments, userEnv: env.IProcessEnvironment): Promise {
@@ -68,7 +67,7 @@ function quit(message?: string);
 function quit(arg?: any) {
 	let exitCode = 0;
 	if (typeof arg === 'string') {
-		env.log(arg)
+		env.log(arg);
 	} else {
 		exitCode = 1; // signal error to the outside
 		if (arg.stack) {
@@ -84,6 +83,15 @@ function quit(arg?: any) {
 function main(ipcServer: Server, userEnv: env.IProcessEnvironment): void {
 	env.log('### VSCode main.js ###');
 	env.log(env.appRoot, env.cliArgs);
+
+	// Setup Windows mutex
+	let windowsMutex: Mutex = null;
+	try {
+		const Mutex = (<any>require.__$__nodeRequire('windows-mutex')).Mutex;
+		windowsMutex = new Mutex(env.product.win32MutexName);
+	} catch (e) {
+		// noop
+	}
 
 	// Register IPC services
 	ipcServer.registerService('LaunchService', new LaunchService());
@@ -118,6 +126,9 @@ function main(ipcServer: Server, userEnv: env.IProcessEnvironment): void {
 		}
 
 		sharedProcess.kill();
+		if (windowsMutex) {
+			windowsMutex.release();
+		}
 	});
 
 	// Lifecycle
@@ -194,7 +205,7 @@ function setupIPC(): TPromise<Server> {
 
 					// Tests from CLI require to be the only instance currently (TODO@Ben support multiple instances and output)
 					if (env.isTestingFromCli) {
-						const errorMsg = 'Running tests from the command line is currently only supported if no other instance of Code is running.';
+						const errorMsg = 'Running extension tests from the command line is currently only supported if no other instance of Code is running.';
 						console.error(errorMsg);
 
 						return Promise.wrapError(errorMsg);
@@ -232,15 +243,6 @@ function setupIPC(): TPromise<Server> {
 	return setup(true);
 }
 
-function setupMutex() {
-	try {
-		var Mutex = (<any> require.__$__nodeRequire('windows-mutex')).Mutex;
-		new Mutex('vscode');
-	} catch (e) {
-		// noop
-	}
-}
-
 // On some platforms we need to manually read from the global environment variables
 // and assign them to the process environment (e.g. when doubleclick app on Mac)
 getUserEnvironment()
@@ -249,7 +251,6 @@ getUserEnvironment()
 
 		return timebomb()
 			.then(setupIPC)
-			.then(ipcServer => { setupMutex(); return ipcServer; })
 			.then(ipcServer => main(ipcServer, userEnv));
 	})
 	.done(null, quit);

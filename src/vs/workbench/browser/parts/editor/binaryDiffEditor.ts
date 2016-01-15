@@ -16,8 +16,8 @@ import {IScrollableElement} from 'vs/base/browser/ui/scrollbar/scrollableElement
 import {ScrollableElement} from 'vs/base/browser/ui/scrollbar/impl/scrollableElement';
 import {BaseEditor} from 'vs/workbench/browser/parts/editor/baseEditor';
 import {EditorInput, EditorOptions} from 'vs/workbench/common/editor';
-import {BinaryEditorModel} from 'vs/workbench/browser/parts/editor/binaryEditorModel';
-import {DiffEditorModel} from 'vs/workbench/browser/parts/editor/diffEditorModel';
+import {BinaryEditorModel} from 'vs/workbench/common/editor/binaryEditorModel';
+import {DiffEditorModel} from 'vs/workbench/common/editor/diffEditorModel';
 import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
 import {ITelemetryService} from 'vs/platform/telemetry/common/telemetry';
 
@@ -215,9 +215,9 @@ export class BinaryResourceDiffEditor extends BaseEditor implements IVerticalSas
 		// Sash
 		this.sash.dispose();
 
-		// Destroy Scrollbar
-		this.leftScrollbar.destroy();
-		this.rightScrollbar.destroy();
+		// Dispose Scrollbar
+		this.leftScrollbar.dispose();
+		this.rightScrollbar.dispose();
 
 		// Destroy Container
 		this.leftBinaryContainer.destroy();

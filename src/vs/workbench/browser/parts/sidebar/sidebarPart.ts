@@ -23,9 +23,9 @@ import {ProgressBar} from 'vs/base/browser/ui/progressbar/progressbar';
 import {Scope, IActionBarRegistry, Extensions, prepareActions} from 'vs/workbench/browser/actionBarRegistry';
 import {Action, IAction} from 'vs/base/common/actions';
 import {Part} from 'vs/workbench/browser/part';
-import {EventType as WorkbenchEventType, ViewletEvent} from 'vs/workbench/browser/events';
+import {EventType as WorkbenchEventType, ViewletEvent} from 'vs/workbench/common/events';
 import {Viewlet, EventType as ViewletEventType, IViewletRegistry, Extensions as ViewletExtensions} from 'vs/workbench/browser/viewlet';
-import {IWorkbenchActionRegistry, Extensions as ActionExtensions} from 'vs/workbench/browser/actionRegistry';
+import {IWorkbenchActionRegistry, Extensions as ActionExtensions} from 'vs/workbench/common/actionRegistry';
 import {SyncActionDescriptor} from 'vs/platform/actions/common/actions';
 import {WorkbenchProgressService} from 'vs/workbench/services/progress/browser/progressService';
 import {IViewletService} from 'vs/workbench/services/viewlet/common/viewletService';
@@ -39,10 +39,11 @@ import {IMessageService, Severity} from 'vs/platform/message/common/message';
 import {IProgressService} from 'vs/platform/progress/common/progress';
 import {ITelemetryService} from 'vs/platform/telemetry/common/telemetry';
 import {IKeybindingService} from 'vs/platform/keybinding/common/keybindingService';
-import {KeybindingsUtils} from 'vs/platform/keybinding/common/keybindingsUtils';
 import {KeyMod, KeyCode} from 'vs/base/common/keyCodes';
 
 export class SidebarPart extends Part implements IViewletService {
+
+	public static activeViewletSettingsKey = 'workbench.sidebar.activeviewletid';
 
 	public serviceId = IViewletService;
 
@@ -234,6 +235,9 @@ export class SidebarPart extends Part implements IViewletService {
 		// Remember Viewlet
 		this.activeViewlet = viewlet;
 
+		// Store in preferences
+		this.storageService.store(SidebarPart.activeViewletSettingsKey, this.activeViewlet.getId(), StorageScope.WORKSPACE);
+
 		// Remember
 		this.lastActiveViewletId = this.activeViewlet.getId();
 
@@ -367,7 +371,7 @@ export class SidebarPart extends Part implements IViewletService {
 		}
 
 		let keybinding: string = null;
-		let keys = this.keybindingService.lookupKeybindings(viewletId).map(k => k.toLabel());
+		let keys = this.keybindingService.lookupKeybindings(viewletId).map(k => this.keybindingService.getLabelFor(k));
 		if (keys && keys.length) {
 			keybinding = keys[0];
 		}

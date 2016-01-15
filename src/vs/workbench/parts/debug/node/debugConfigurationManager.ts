@@ -6,24 +6,27 @@
 import path = require('path');
 import nls = require('vs/nls');
 import { Promise, TPromise } from 'vs/base/common/winjs.base';
+import objects = require('vs/base/common/objects');
 import uri from 'vs/base/common/uri';
+import { schemas } from 'vs/base/common/network';
 import paths = require('vs/base/common/paths');
+import Severity from 'vs/base/common/severity';
 import { IJSONSchema } from 'vs/base/common/jsonSchema';
-import platform = require('vs/platform/platform');
-import pluginsRegistry = require('vs/platform/plugins/common/pluginsRegistry');
 import editor = require('vs/editor/common/editorCommon');
-import jsonContributionRegistry = require('vs/languages/json/common/jsonContributionRegistry');
+import pluginsRegistry = require('vs/platform/plugins/common/pluginsRegistry');
+import platform = require('vs/platform/platform');
+import jsonContributionRegistry = require('vs/platform/jsonschemas/common/jsonContributionRegistry');
+import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
+import { IFileService } from 'vs/platform/files/common/files';
+import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import debug = require('vs/workbench/parts/debug/common/debug');
 import { SystemVariables } from 'vs/workbench/parts/lib/node/systemVariables';
 import { Adapter } from 'vs/workbench/parts/debug/node/debugAdapter';
 import { IWorkspaceContextService } from 'vs/workbench/services/workspace/common/contextService';
-import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { IFileService } from 'vs/platform/files/common/files';
-import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { IWorkbenchEditorService } from 'vs/workbench/services/editor/common/editorService';
-import { IQuickOpenService } from 'vs/workbench/services/quickopen/browser/quickOpenService';
+import { IQuickOpenService } from 'vs/workbench/services/quickopen/common/quickOpenService';
 
-// Debuggers extension point
+// debuggers extension point
 
 export var debuggersExtPoint = pluginsRegistry.PluginsRegistry.registerExtensionPoint<debug.IRawAdapter[]>('debuggers', {
 	description: nls.localize('vscode.extension.contributes.debuggers', 'Contributes debug adapters.'),
@@ -57,6 +60,10 @@ export var debuggersExtPoint = pluginsRegistry.PluginsRegistry.registerExtension
 			program: {
 				description: nls.localize('vscode.extension.contributes.debuggers.program', "Path to the debug adapter program. Path is either absolute or relative to the extension folder."),
 				type: 'string'
+			},
+			args: {
+				description: nls.localize('vscode.extension.contributes.debuggers.args', "Optional arguments to pass to the adapter."),
+				type: 'array'
 			},
 			runtime : {
 				description: nls.localize('vscode.extension.contributes.debuggers.runtime', "Optional runtime in case the program attribute is not an executable but requires a runtime."),
@@ -108,10 +115,10 @@ export var debuggersExtPoint = pluginsRegistry.PluginsRegistry.registerExtension
 	}
 });
 
-// Debug General Schema
+// debug general schema
 
 export var schemaId = 'local://schemas/launch';
-var schema: IJSONSchema = {
+const schema: IJSONSchema = {
 	id: schemaId,
 	type: 'object',
 	title: nls.localize('app.launch.json.title', "Launch configuration"),
@@ -132,7 +139,7 @@ var schema: IJSONSchema = {
 	}
 }
 
-var jsonRegistry = <jsonContributionRegistry.IJSONContributionRegistry>platform.Registry.as(jsonContributionRegistry.Extensions.JSONContribution);
+const jsonRegistry = <jsonContributionRegistry.IJSONContributionRegistry>platform.Registry.as(jsonContributionRegistry.Extensions.JSONContribution);
 jsonRegistry.registerSchema(schemaId, schema);
 jsonRegistry.addSchemaFileAssociation('/.vscode/launch.json', schemaId);
 
@@ -176,7 +183,9 @@ export class ConfigurationManager {
 								if (attribute === 'enableBreakpointsFor') {
 									Object.keys(adapter.enableBreakpointsFor).forEach(languageId => duplicate.enableBreakpointsFor[languageId] = true);
 								} else if (duplicate[attribute] && attribute !== 'type') {
-									extension.collector.warn(nls.localize('duplicateDebuggerType', "Debug type '{0}' is already registered and has attribute '{1}', ignoring attribute '{1}'.", adapter.type, attribute));
+									// give priority to the later registered extension.
+									duplicate[attribute] = adapter[attribute];
+									extension.collector.error(nls.localize('duplicateDebuggerType', "Debug type '{0}' is already registered and has attribute '{1}', ignoring attribute '{1}'.", adapter.type, attribute));
 								} else {
 									duplicate[attribute] = adapter[attribute];
 								}
@@ -192,7 +201,7 @@ export class ConfigurationManager {
 				});
 			});
 
-			// Update the schema to include all attributes and types from extensions.
+			// update the schema to include all attributes and types from extensions.
 			// debug.schema.properties['configurations'].items.properties.type.enum = this.adapters.map(adapter => adapter.type);
 			this.adapters.forEach(adapter => {
 				const schemaAttributes = adapter.getSchemaAttributes();
@@ -215,32 +224,30 @@ export class ConfigurationManager {
 		return this.adapters.filter(adapter => adapter.type === this.configuration.type).pop();
 	}
 
-	public setConfiguration(name: string, extensionHostData: any = null): Promise {
+	public setConfiguration(name: string): Promise {
 		return this.loadLaunchConfig().then(config => {
 			if (!config || !config.configurations) {
 				this.configuration = null;
 				return;
 			}
 
-			// If the configuration name is not set yet, take the first launch config (can happen if debug viewlet has not been opened yet).
+			// if the configuration name is not set yet, take the first launch config (can happen if debug viewlet has not been opened yet).
 			const filtered = name ? config.configurations.filter(cfg => cfg.name === name) : [config.configurations[0]];
 
-			// Massage configuration attributes - append workspace path to relatvie paths, substitute variables in paths.
-			this.configuration = filtered.length === 1 ? filtered[0] : null;
-			if (this.configuration && this.systemVariables) {
+			// massage configuration attributes - append workspace path to relatvie paths, substitute variables in paths.
+			this.configuration = filtered.length === 1 ? objects.deepClone(filtered[0]) : null;
+			if (this.configuration) {
+				if (this.systemVariables) {
+					Object.keys(this.configuration).forEach(key => {
+						this.configuration[key] = this.systemVariables.resolve(this.configuration[key]);
+					});
+				}
+
 				this.configuration.debugServer = config.debugServer;
-				this.configuration.outDir = this.resolvePath(this.systemVariables.resolve(this.configuration.outDir));
-				this.configuration.address = this.configuration.address || 'localhost';
-				this.configuration.program = this.resolvePath(this.systemVariables.resolve(this.configuration.program));
-				this.configuration.stopOnEntry = this.configuration.stopOnEntry === undefined ? false : this.configuration.stopOnEntry;
-				this.configuration.args = this.configuration.args && this.configuration.args.length > 0 ? this.systemVariables.resolve(this.configuration.args) : null;
-				this.configuration.env = <{ [key: string]: string; }> this.systemVariables.resolve(this.configuration.env);
-				this.configuration.cwd = this.resolvePath(this.systemVariables.resolve(this.configuration.cwd) || '.', false);
-				this.configuration.runtimeExecutable = this.resolvePath(this.systemVariables.resolve(this.configuration.runtimeExecutable));
-				this.configuration.runtimeArgs = this.configuration.runtimeArgs && this.configuration.runtimeArgs.length > 0 ? this.systemVariables.resolve(this.configuration.runtimeArgs) : null;
 				this.configuration.outDir = this.resolvePath(this.configuration.outDir);
-				// send opaque data back as part of the (undocumented) arguments of the launch request.
-				this.configuration.extensionHostData = extensionHostData;
+				this.configuration.program = this.resolvePath(this.configuration.program);
+				this.configuration.cwd = this.resolvePath(this.configuration.cwd || '.');
+				this.configuration.runtimeExecutable = this.resolvePath(this.configuration.runtimeExecutable);
 			}
 		});
 	}
@@ -294,7 +301,7 @@ export class ConfigurationManager {
 			return Promise.as(true);
 		}
 
-		// Check package.json for 'main' or 'scripts' so we generate a more pecise 'program' attribute in launch.json.
+		// check package.json for 'main' or 'scripts' so we generate a more pecise 'program' attribute in launch.json.
 		const packageJsonUri = uri.file(paths.join(this.contextService.getWorkspace().resource.fsPath, '/package.json'));
 		return this.fileService.resolveContent(packageJsonUri).then(jsonContent => {
 			try {
@@ -310,8 +317,8 @@ export class ConfigurationManager {
 			return null;
 		}, err => null).then(program => {
 			adapter.initialConfigurations.forEach(config => {
-				if (program && config["program"]) {
-					config["program"] = program;
+				if (program && config.program) {
+					config.program = program;
 				}
 			});
 		});
@@ -321,17 +328,17 @@ export class ConfigurationManager {
 		if (model.getLineLastNonWhitespaceColumn(lineNumber) === 0) {
 			return false;
 		}
-		if (model.getAssociatedResource().isInMemory()) {
+		if (model.getAssociatedResource().scheme === schemas.inMemory) {
 			return false;
 		}
 
-		var mode = model ? model.getMode() : null;
-		var modeId = mode ? mode.getId() : null;
+		const mode = model ? model.getMode() : null;
+		const modeId = mode ? mode.getId() : null;
 
 		return !!this.allModeIdsForBreakpoints[modeId];
 	}
 
-	private resolvePath(p: string, showError = true): string {
+	private resolvePath(p: string): string {
 		if (!p) {
 			return null;
 		}

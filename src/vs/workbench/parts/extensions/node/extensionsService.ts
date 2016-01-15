@@ -13,14 +13,18 @@ import { ServiceEvent } from 'vs/base/common/service';
 import errors = require('vs/base/common/errors');
 import * as pfs from 'vs/base/node/pfs';
 import { assign } from 'vs/base/common/objects';
+import { flatten } from 'vs/base/common/arrays';
 import { extract, buffer } from 'vs/base/node/zip';
 import { Promise, TPromise } from 'vs/base/common/winjs.base';
 import { IExtensionsService, IExtension, IExtensionManifest, IGalleryInformation } from 'vs/workbench/parts/extensions/common/extensions';
-import { download, getProxyAgent, getSystemProxyAgent } from 'vs/base/node/request';
+import { download } from 'vs/base/node/request';
+import { getProxyAgent } from 'vs/base/node/proxy';
 import { IWorkspaceContextService } from 'vs/workbench/services/workspace/common/contextService';
 import { Limiter } from 'vs/base/common/async';
 import Event, { Emitter } from 'vs/base/common/event';
 import { UserSettings } from 'vs/workbench/node/userSettings';
+import * as semver from 'semver';
+import {groupBy, values} from 'vs/base/common/collections';
 
 function parseManifest(raw: string): TPromise<IExtensionManifest> {
 	return new Promise((c, e) => {
@@ -116,14 +120,22 @@ export class ExtensionsService implements IExtensionsService {
 			return TPromise.wrapError(new Error(nls.localize('missingGalleryInformation', "Gallery information is missing")));
 		}
 
-		const url = `${ galleryInformation.galleryApiUrl }/publisher/${ extension.publisher }/extension/${ extension.name }/latest/assetbyname/Microsoft.VisualStudio.Services.VSIXPackage?install=true`;
+		const url = galleryInformation.downloadUrl;
 		const zipPath = path.join(tmpdir(), galleryInformation.id);
-		const extensionPath = path.join(this.extensionsPath, `${ extension.publisher }.${ extension.name }`);
+		const extensionPath = path.join(this.extensionsPath, `${ extension.publisher }.${ extension.name }-${ extension.version }`);
 		const manifestPath = path.join(extensionPath, 'package.json');
 
-		return UserSettings.getValue(this.contextService, 'http.proxy').then((httpProxySettings) => {
-			const getAgent = url => httpProxySettings ? getProxyAgent(url, httpProxySettings) : getSystemProxyAgent(url);
-			return download(zipPath, { url: url, agent: getAgent(url) })
+		const settings = TPromise.join([
+			UserSettings.getValue(this.contextService, 'http.proxy'),
+			UserSettings.getValue(this.contextService, 'http.proxyStrictSSL')
+		]);
+
+		return settings.then(settings => {
+			const proxyUrl: string = settings[0];
+			const strictSSL: boolean = settings[1];
+			const agent = getProxyAgent(url, { proxyUrl, strictSSL });
+
+			return download(zipPath, { url, agent, strictSSL })
 				.then(() => validate(zipPath, extension))
 				.then(manifest => { this._onInstallExtension.fire(manifest); return manifest; })
 				.then(manifest => extract(zipPath, extensionPath, { sourcePath: 'extension', overwrite: true }).then(() => manifest))
@@ -137,7 +149,7 @@ export class ExtensionsService implements IExtensionsService {
 
 	private installFromZip(zipPath: string): TPromise<IExtension> {
 		return validate(zipPath).then(manifest => {
-			const extensionPath = path.join(this.extensionsPath, `${ manifest.publisher }.${ manifest.name }`);
+			const extensionPath = path.join(this.extensionsPath, `${ manifest.publisher }.${ manifest.name }-${ manifest.version }`);
 			this._onInstallExtension.fire(manifest);
 
 			return extract(zipPath, extensionPath, { sourcePath: 'extension', overwrite: true })
@@ -156,11 +168,31 @@ export class ExtensionsService implements IExtensionsService {
 			.then(() => this._onDidUninstallExtension.fire(extension));
 	}
 
-	public getInstalled(): TPromise<IExtension[]> {
+	public getInstalled(includeDuplicateVersions: boolean = false): TPromise<IExtension[]> {
+		const all = this.getAllInstalled();
+
+		if (includeDuplicateVersions) {
+			return all;
+		}
+
+		return all.then(plugins => {
+			const byId = values(groupBy(plugins, p => `${ p.publisher }.${ p.name }`));
+			return byId.map(p => p.sort((a, b) => semver.rcompare(a.version, b.version))[0]);
+		});
+	}
+
+	private getDeprecated(): TPromise<IExtension[]> {
+		return this.getAllInstalled().then(plugins => {
+			const byId = values(groupBy(plugins, p => `${ p.publisher }.${ p.name }`));
+			return flatten(byId.map(p => p.sort((a, b) => semver.rcompare(a.version, b.version)).slice(1)));
+		});
+	}
+
+	private getAllInstalled(): TPromise<IExtension[]> {
 		const limiter = new Limiter(10);
 
 		return pfs.readdir(this.extensionsPath)
-			.then<IExtensionManifest[]>(extensions => Promise.join(extensions.map(e => {
+			.then<IExtension[]>(extensions => Promise.join(extensions.map(e => {
 				const extensionPath = path.join(this.extensionsPath, e);
 
 				return limiter.queue(
@@ -174,6 +206,11 @@ export class ExtensionsService implements IExtensionsService {
 	}
 
 	private getInstallationPath(extension: IExtension): string {
-		return extension.path ||  path.join(this.extensionsPath, `${ extension.publisher }.${ extension.name }`);
+		return extension.path || path.join(this.extensionsPath, `${ extension.publisher }.${ extension.name }-${ extension.version }`);
 	}
+
+	public removeDeprecatedExtensions(): TPromise<void> {
+		return this.getDeprecated()
+			.then<void>(extensions => TPromise.join(extensions.filter(e => !!e.path).map(e => pfs.rimraf(e.path))));
+		}
 }

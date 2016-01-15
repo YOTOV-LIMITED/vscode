@@ -6,12 +6,16 @@
 'use strict';
 
 import {NullThreadService} from 'vs/platform/test/common/nullThreadService';
-import {create} from 'vs/base/common/types';
 import {SyncDescriptor0} from 'vs/platform/instantiation/common/descriptors';
-import {TPromise} from 'vs/base/common/winjs.base';
 import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
+import {TPromise} from 'vs/base/common/winjs.base';
 
 export class TestThreadService extends NullThreadService {
+
+	constructor(instantiationService: IInstantiationService) {
+		super();
+		this.setInstantiationService(instantiationService);
+	}
 
 	private _callCountValue: number = 0;
 	private _idle: TPromise<any>;
@@ -21,42 +25,49 @@ export class TestThreadService extends NullThreadService {
 		return this._callCountValue;
 	}
 
-	private set _callCount(value:number) {
+	private set _callCount(value: number) {
 		this._callCountValue = value;
 		if (this._callCountValue === 0) {
-			this._completeIdle();
+			if (this._completeIdle) {
+				this._completeIdle();
+			}
 			this._idle = undefined;
 		}
 	}
 
 	sync(): TPromise<any> {
-		if (this._callCount === 0) {
-			return TPromise.as(undefined);
-		}
-		if (!this._idle) {
-			this._idle = new TPromise<any>((c, e) => {
-				this._completeIdle = c;
-			}, function() {
-				// no cancel
-			});
-		}
-		return this._idle;
+		return new TPromise<any>((c) => {
+			setTimeout(c, 0);
+		}).then(() => {
+			if (this._callCount === 0) {
+				return;
+			}
+			if (!this._idle) {
+				this._idle = new TPromise<any>((c, e) => {
+					this._completeIdle = c;
+				}, function() {
+					// no cancel
+				});
+			}
+			return this._idle;
+		});
 	}
 
 	protected _registerAndInstantiateMainProcessActor<T>(id: string, descriptor: SyncDescriptor0<T>): T {
 
-		let _calls:{path: string; args: any[] }[] = [];
+		let _calls: {path: string; args: any[] }[] = [];
 		let _instance: any;
 
 		return this._getOrCreateProxyInstance({
-
 
 			callOnRemote: (proxyId: string, path: string, args: any[]): TPromise<any> => {
 
 				this._callCount++;
 				_calls.push({path, args});
 
-				return TPromise.timeout(0).then(() => {
+				return new TPromise<any>((c) => {
+					setTimeout(c, 0);
+				}).then(() => {
 					if (!_instance) {
 						_instance = this._instantiationService.createInstance(descriptor.ctor);
 					}
@@ -85,6 +96,3 @@ export class TestThreadService extends NullThreadService {
 		return this._getOrCreateLocalInstance(id, descriptor);
 	}
 }
-
-const Instance = new TestThreadService();
-export default Instance;

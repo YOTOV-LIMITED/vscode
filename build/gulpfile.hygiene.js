@@ -9,6 +9,7 @@ var es = require('event-stream');
 var path = require('path');
 
 var all = [
+	'*',
 	'build/**/*',
 	'extensions/**/*',
 	'scripts/**/*',
@@ -18,15 +19,19 @@ var all = [
 
 var eolFilter = [
 	'**',
-	'!extensions/csharp-o/bin/**',
+	'!ThirdPartyNotices.txt',
+	'!LICENSE.txt',
 	'!extensions/**/out/**',
 	'!**/node_modules/**',
 	'!**/fixtures/**',
-	'!**/*.{svg,exe,png,scpt,bat,cur,ttf,woff,eot}',
+	'!**/*.{svg,exe,png,scpt,bat,cmd,cur,ttf,woff,eot}',
 ];
 
 var indentationFilter = [
 	'**',
+	'!ThirdPartyNotices.txt',
+	'!**/*.md',
+	'!**/*.yml',
 	'!**/lib/**',
 	'!**/*.d.ts',
 	'!extensions/typescript/server/**',
@@ -40,7 +45,6 @@ var indentationFilter = [
 	'!**/vs/languages/markdown/common/raw.marked.js',
 	'!**/vs/base/common/winjs.base.raw.js',
 	'!**/vs/base/node/terminateProcess.sh',
-	'!extensions/csharp-o/gulpfile.js',
 	'!**/vs/base/node/terminateProcess.sh',
 	'!**/vs/text.js',
 	'!**/vs/nls.js',
@@ -57,6 +61,9 @@ var copyrightFilterList = [
 	'!**/*.html',
 	'!**/test/**',
 	'!**/*.md',
+	'!**/*.bat',
+	'!**/*.cmd',
+	'!resources/win32/bin/code.js',
 	'!**/*.sh',
 	'!**/*.txt',
 	'!src/vs/editor/standalone-languages/swift.ts',

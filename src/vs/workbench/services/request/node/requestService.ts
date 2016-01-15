@@ -14,7 +14,6 @@ import lifecycle = require('vs/base/common/lifecycle');
 import timer = require('vs/base/common/timer');
 import platform = require('vs/platform/platform');
 import async = require('vs/base/common/async');
-import {IRequestService} from 'vs/platform/request/common/request';
 import {IConfigurationService, IConfigurationServiceEvent, ConfigurationServiceEventTypes} from 'vs/platform/configuration/common/configuration';
 import {BaseRequestService} from 'vs/platform/request/common/baseRequestService';
 import rawHttpService = require('vs/workbench/services/request/node/rawHttpService');
@@ -24,7 +23,7 @@ import {IWorkspaceContextService} from 'vs/platform/workspace/common/workspace';
 
 interface IRawHttpService {
 	xhr(options: http.IXHROptions): TPromise<http.IXHRResponse>;
-	configure(proxy: string): void;
+	configure(proxy: string, strictSSL: boolean): void;
 }
 
 interface IXHRFunction {
@@ -42,14 +41,10 @@ export class RequestService extends BaseRequestService implements IThreadSynchro
 		super(contextService, telemetryService);
 		this.callOnDispose = [];
 
-		let configureRawService = (rawHttpService: IRawHttpService, configuration: any) => {
-			rawHttpService.configure(configuration.http && configuration.http.proxy);
-		};
-
 		// proxy setting updating
 		this.callOnDispose.push(configurationService.addListener(ConfigurationServiceEventTypes.UPDATED, (e: IConfigurationServiceEvent) => {
 			this.rawHttpServicePromise.then((rawHttpService) => {
-				rawHttpService.configure(e.config.http && e.config.http.proxy);
+				rawHttpService.configure(e.config.http && e.config.http.proxy, e.config.http.proxyStrictSSL);
 			});
 		}));
 	}
@@ -58,7 +53,7 @@ export class RequestService extends BaseRequestService implements IThreadSynchro
 	private get rawHttpServicePromise(): TPromise<IRawHttpService> {
 		if (!this._rawHttpServicePromise) {
 			this._rawHttpServicePromise = this.configurationService.loadConfiguration().then((configuration: any) => {
-				rawHttpService.configure(configuration.http && configuration.http.proxy);
+				rawHttpService.configure(configuration.http && configuration.http.proxy, configuration.http.proxyStrictSSL);
 				return rawHttpService;
 			});
 		}
@@ -125,6 +120,11 @@ confRegistry.registerConfiguration({
 		'http.proxy': {
 			'type': 'string',
 			'description': nls.localize('proxy', "The proxy setting to use. If not set will be taken from the http_proxy and https_proxy environment variables")
+		},
+		'http.proxyStrictSSL': {
+			'type': 'boolean',
+			'default': true,
+			'description': nls.localize('strictSSL', "Whether the proxy server certificate should be verified against the list of supplied CAs.")
 		}
 	}
 });

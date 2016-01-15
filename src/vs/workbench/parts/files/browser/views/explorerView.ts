@@ -12,9 +12,9 @@ import errors = require('vs/base/common/errors');
 import paths = require('vs/base/common/paths');
 import {Action, IActionRunner} from 'vs/base/common/actions';
 import {prepareActions} from 'vs/workbench/browser/actionBarRegistry';
-import {ITree} from 'vs/base/parts/tree/common/tree';
+import {ITree} from 'vs/base/parts/tree/browser/tree';
 import {Tree} from 'vs/base/parts/tree/browser/treeImpl';
-import {EditorEvent, EventType as WorkbenchEventType} from 'vs/workbench/browser/events';
+import {EditorEvent, EventType as WorkbenchEventType} from 'vs/workbench/common/events';
 import {LocalFileChangeEvent, IFilesConfiguration} from 'vs/workbench/parts/files/common/files';
 import {IFileStat, IResolveFileOptions, FileChangeType, FileChangesEvent, IFileChange, EventType as FileEventType, IFileService} from 'vs/platform/files/common/files';
 import {FileImportedEvent, RefreshViewExplorerAction, NewFolderAction, NewFileAction} from 'vs/workbench/parts/files/browser/fileActions';
@@ -23,7 +23,7 @@ import {FileDragAndDrop, FileFilter, FileSorter, FileController, FileRenderer, F
 import lifecycle = require('vs/base/common/lifecycle');
 import DOM = require('vs/base/browser/dom');
 import {CollapseAction, CollapsibleViewletView} from 'vs/workbench/browser/viewlet';
-import {FileStat} from 'vs/workbench/parts/files/browser/views/explorerViewModel';
+import {FileStat} from 'vs/workbench/parts/files/common/explorerViewModel';
 import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
 import {IPartService} from 'vs/workbench/services/part/common/partService';
 import {IWorkspace} from 'vs/platform/workspace/common/workspace';
@@ -51,8 +51,8 @@ export class ExplorerView extends CollapsibleViewletView {
 	private filter: FileFilter;
 	private viewletState: FileViewletState;
 
-	private explorerRefreshDelayer: ThrottledDelayer;
-	private explorerImportDelayer: ThrottledDelayer;
+	private explorerRefreshDelayer: ThrottledDelayer<void>;
+	private explorerImportDelayer: ThrottledDelayer<void>;
 
 	private shouldRefresh: boolean;
 
@@ -82,8 +82,8 @@ export class ExplorerView extends CollapsibleViewletView {
 		this.viewletState = viewletState;
 		this.actionRunner = actionRunner;
 
-		this.explorerRefreshDelayer = new ThrottledDelayer(ExplorerView.EXPLORER_FILE_CHANGES_REFRESH_DELAY);
-		this.explorerImportDelayer = new ThrottledDelayer(ExplorerView.EXPLORER_IMPORT_REFRESH_DELAY);
+		this.explorerRefreshDelayer = new ThrottledDelayer<void>(ExplorerView.EXPLORER_FILE_CHANGES_REFRESH_DELAY);
+		this.explorerImportDelayer = new ThrottledDelayer<void>(ExplorerView.EXPLORER_IMPORT_REFRESH_DELAY);
 	}
 
 	public renderHeader(container: HTMLElement): void {

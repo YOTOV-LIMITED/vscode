@@ -6,7 +6,6 @@
 import assert = require('assert');
 import uri from 'vs/base/common/uri';
 import severity from 'vs/base/common/severity';
-import debug = require('vs/workbench/parts/debug/common/debug');
 import debugmodel = require('vs/workbench/parts/debug/common/debugModel');
 
 suite('Debug - Model', () => {
@@ -24,20 +23,20 @@ suite('Debug - Model', () => {
 
 	test('breakpoints simple', () => {
 		var modelUri = uri.file('/myfolder/myfile.js');
-		model.setBreakpointsForModel(modelUri, [{ lineNumber: 5, enabled: true }, { lineNumber: 10, enabled: false }]);
+		model.addBreakpoints([{ uri: modelUri, lineNumber: 5, enabled: true }, { uri: modelUri, lineNumber: 10, enabled: false }]);
 		assert.equal(model.areBreakpointsActivated(), true);
 		assert.equal(model.getBreakpoints().length, 2);
 
-		model.removeBreakpoints(modelUri);
+		model.removeBreakpoints(model.getBreakpoints());
 		assert.equal(model.getBreakpoints().length, 0);
 	});
 
 	test('breakpoints toggling', () => {
 		var modelUri = uri.file('/myfolder/myfile.js');
-		model.setBreakpointsForModel(modelUri, [{ lineNumber: 5, enabled: true }, { lineNumber: 10, enabled: false }]);
-		model.toggleBreakpoint(modelUri, 12);
+		model.addBreakpoints([{ uri: modelUri, lineNumber: 5, enabled: true }, { uri: modelUri, lineNumber: 10, enabled: false }]);
+		model.addBreakpoints([{ uri: modelUri, lineNumber: 12, enabled: true, condition: 'fake condition'}]);
 		assert.equal(model.getBreakpoints().length, 3);
-		model.toggleBreakpoint(modelUri, 10);
+		model.removeBreakpoints([model.getBreakpoints().pop()]);
 		assert.equal(model.getBreakpoints().length, 2);
 
 		model.toggleBreakpointsActivated();
@@ -49,13 +48,15 @@ suite('Debug - Model', () => {
 	test('breakpoints two files', () => {
 		var modelUri1 = uri.file('/myfolder/my file first.js');
 		var modelUri2 = uri.file('/secondfolder/second/second file.js')
-		model.setBreakpointsForModel(modelUri1, [{ lineNumber: 5, enabled: true }, { lineNumber: 10, enabled: false }]);
-		model.setBreakpointsForModel(modelUri2, [{ lineNumber: 1, enabled: true }, { lineNumber: 2, enabled: true }, { lineNumber: 3, enabled: false }]);
+		model.addBreakpoints([{ uri: modelUri1, lineNumber: 5, enabled: true }, { uri: modelUri1, lineNumber: 10, enabled: false }]);
+		model.addBreakpoints([{ uri: modelUri2, lineNumber: 1, enabled: true }, { uri: modelUri2, lineNumber: 2, enabled: true }, { uri: modelUri2, lineNumber: 3, enabled: false }]);
 
 		assert.equal(model.getBreakpoints().length, 5);
 		var bp = model.getBreakpoints()[0];
 		var originalLineLumber = bp.lineNumber;
-		model.setBreakpointLineNumber(bp, 100);
+		const update:any = {};
+		update[bp.getId()] = { line: 100, verified: false };
+		model.updateBreakpoints(update);
 		assert.equal(bp.lineNumber, 100);
 		assert.equal(bp.desiredLineNumber, originalLineLumber);
 
@@ -66,7 +67,7 @@ suite('Debug - Model', () => {
 		model.toggleEnablement(bp);
 		assert.equal(bp.enabled, true);
 
-		model.removeBreakpoints(modelUri1);
+		model.removeBreakpoints(model.getBreakpoints().filter(bp => bp.source.uri.toString() === modelUri1.toString()));
 		assert.equal(model.getBreakpoints().length, 3);
 	});
 
@@ -182,7 +183,8 @@ suite('Debug - Model', () => {
 		assert.equal(debugmodel.getFullExpressionName(new debugmodel.Expression(null, false), type), null);
 		assert.equal(debugmodel.getFullExpressionName(new debugmodel.Expression('son', false), type), 'son');
 
-		const son = new debugmodel.Variable(new debugmodel.Variable(new debugmodel.Variable(null, 0, 'grandfather', '75'), 0, 'father', '45'), 0, 'son', '20');
+		const scope = new debugmodel.Scope(1, 'myscope', 1, false);
+		const son = new debugmodel.Variable(new debugmodel.Variable(new debugmodel.Variable(scope, 0, 'grandfather', '75'), 0, 'father', '45'), 0, 'son', '20');
 		assert.equal(debugmodel.getFullExpressionName(son, type), 'grandfather.father.son');
 
 		const grandson = new debugmodel.Variable(son, 0, '/weird_name', '1');

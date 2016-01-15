@@ -6,9 +6,9 @@
 'use strict';
 
 import {TPromise} from 'vs/base/common/winjs.base';
-import {onUnexpectedError} from 'vs/base/common/errors';
+import {onUnexpectedError, illegalArgument} from 'vs/base/common/errors';
 import {IDisposable} from 'vs/base/common/lifecycle';
-import LanguageFeatureRegistry from 'vs/editor/common/modes/languageFeatureRegistry';
+import {CommonEditorRegistry} from 'vs/editor/common/editorCommonExtensions';
 import {IRange} from 'vs/editor/common/editorCommon';
 import URI from 'vs/base/common/uri';
 
@@ -49,7 +49,7 @@ export namespace NavigateTypesSupportRegistry {
 					}
 				}
 			}
-		}
+		};
 	}
 
 	export function all(): INavigateTypesSupport[] {
@@ -73,3 +73,11 @@ export function getNavigateToItems(query: string): TPromise<ITypeBearing[]> {
 		return result;
 	});
 }
+
+CommonEditorRegistry.registerLanguageCommand('_executeWorkspaceSymbolProvider', function(accessor, args: { query: string;}) {
+	let {query} = args;
+	if (typeof query !== 'string') {
+		throw illegalArgument();
+	}
+	return getNavigateToItems(query);
+});

@@ -8,8 +8,8 @@ import winjs = require('vs/base/common/winjs.base');
 import lifecycle = require('vs/base/common/lifecycle');
 import async = require('vs/base/common/async');
 import WorkbenchEditorCommon = require('vs/workbench/common/editor');
-import stringei = require('vs/workbench/browser/parts/editor/stringEditorInput');
-import diffei = require('vs/workbench/browser/parts/editor/diffEditorInput');
+import stringei = require('vs/workbench/common/editor/stringEditorInput');
+import diffei = require('vs/workbench/common/editor/diffEditorInput');
 import git = require('vs/workbench/parts/git/common/git');
 import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
 import {IEditorInput} from 'vs/platform/editor/common/editor';
@@ -101,7 +101,7 @@ export class NativeGitIndexStringEditorInput
 	private status: git.IFileStatus;
 	private path: string;
 	private treeish: string;
-	private delayer: async.ThrottledDelayer;
+	private delayer: async.ThrottledDelayer<WorkbenchEditorCommon.EditorModel>;
 	private toDispose: lifecycle.IDisposable[];
 
 	constructor(name: any, description: string, mime: string, status: git.IFileStatus, path: string, treeish: string,
@@ -116,7 +116,7 @@ export class NativeGitIndexStringEditorInput
 		this.status = status;
 		this.path = path;
 		this.treeish = treeish;
-		this.delayer = new async.ThrottledDelayer(1000);
+		this.delayer = new async.ThrottledDelayer<WorkbenchEditorCommon.EditorModel>(1000);
 
 		this.toDispose = [];
 		this.toDispose.push(this.gitService.addListener2(git.ServiceEvents.STATE_CHANGED, () => this.onGitServiceStateChange()));

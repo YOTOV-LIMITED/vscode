@@ -16,11 +16,9 @@ import {IModelService} from 'vs/editor/common/services/modelService';
 import {Remotable, IThreadService, ThreadAffinity, IThreadSynchronizableObject} from 'vs/platform/thread/common/thread';
 import {AllWorkersAttr} from 'vs/platform/thread/common/threadService';
 import {IHTMLContentElement} from 'vs/base/common/htmlContent';
-import {EventSource} from 'vs/base/common/eventSource';
+import Event, {Emitter} from 'vs/base/common/event';
 import URI from 'vs/base/common/uri';
-import {URL} from 'vs/base/common/network';
 import Severity from 'vs/base/common/severity';
-import {EventProvider} from 'vs/base/common/eventProvider';
 import {IDisposable, disposeAll} from 'vs/base/common/lifecycle';
 import {TPromise} from 'vs/base/common/winjs.base';
 import Errors = require('vs/base/common/errors');
@@ -28,7 +26,7 @@ import {anonymize} from 'vs/platform/telemetry/common/telemetry';
 import {Model} from 'vs/editor/common/model/model';
 
 export interface IRawModelData {
-	url:URL;
+	url:URI;
 	versionId:number;
 	value:EditorCommon.IRawText;
 	properties:any;
@@ -154,6 +152,10 @@ class ModelMarkerHandler {
 			htmlMessage = [marker.message];
 		}
 
+		if (marker.source) {
+			htmlMessage.unshift({ isText: true, text: `[${marker.source}] ` });
+		}
+
 		return {
 			stickiness: EditorCommon.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
 			className,
@@ -175,9 +177,9 @@ export class ModelServiceImpl implements IModelService {
 	private _threadService: IThreadService;
 	private _workerHelper: ModelServiceWorkerHelper;
 
-	private _onModelAdded: EventSource<(model: EditorCommon.IModel) => void>;
-	private _onModelRemoved: EventSource<(model: EditorCommon.IModel) => void>;
-	private _onModelModeChanged: EventSource<(model: EditorCommon.IModel, oldModeId:string) => void>;
+	private _onModelAdded: Emitter<EditorCommon.IModel>;
+	private _onModelRemoved: Emitter<EditorCommon.IModel>;
+	private _onModelModeChanged: Emitter<{ model: EditorCommon.IModel; oldModeId: string; }>;
 
 	/**
 	 * All the models known in the system.
@@ -191,9 +193,9 @@ export class ModelServiceImpl implements IModelService {
 
 		this._models = {};
 
-		this._onModelAdded = new EventSource<(model: EditorCommon.IModel) => void>();
-		this._onModelRemoved = new EventSource<(model: EditorCommon.IModel) => void>();
-		this._onModelModeChanged = new EventSource<(model: EditorCommon.IModel, oldModeId:string) => void>();
+		this._onModelAdded = new Emitter<EditorCommon.IModel>();
+		this._onModelRemoved = new Emitter<EditorCommon.IModel>();
+		this._onModelModeChanged = new Emitter<{ model: EditorCommon.IModel; oldModeId: string; }>();
 
 		if(this._markerService) {
 			this._markerServiceSubscription = this._markerService.onMarkerChanged(this._handleMarkerChange, this);
@@ -219,7 +221,7 @@ export class ModelServiceImpl implements IModelService {
 
 	// --- begin IModelService
 
-	private _createModelData(value:string, modeOrPromise:TPromise<Modes.IMode>|Modes.IMode, resource: URL): ModelData {
+	private _createModelData(value:string, modeOrPromise:TPromise<Modes.IMode>|Modes.IMode, resource: URI): ModelData {
 		// create & save the model
 		let model = new Model(value, modeOrPromise, resource);
 		let modelId = MODEL_ID(model.getAssociatedResource());
@@ -235,7 +237,7 @@ export class ModelServiceImpl implements IModelService {
 		return modelData;
 	}
 
-	public createModel(value:string, modeOrPromise:TPromise<Modes.IMode>|Modes.IMode, resource: URL): EditorCommon.IModel {
+	public createModel(value:string, modeOrPromise:TPromise<Modes.IMode>|Modes.IMode, resource: URI): EditorCommon.IModel {
 		let modelData = this._createModelData(value, modeOrPromise, resource);
 		let modelId = modelData.getModelId();
 
@@ -255,7 +257,7 @@ export class ModelServiceImpl implements IModelService {
 		return modelData.model;
 	}
 
-	public destroyModel(resource: URL): void {
+	public destroyModel(resource: URI): void {
 		// We need to support that not all models get disposed through this service (i.e. model.dispose() should work!)
 		let modelData = this._models[MODEL_ID(resource)];
 		if (!modelData) {
@@ -274,7 +276,7 @@ export class ModelServiceImpl implements IModelService {
 		return ret;
 	}
 
-	public getModel(resource: URL): EditorCommon.IModel {
+	public getModel(resource: URI): EditorCommon.IModel {
 		let modelId = MODEL_ID(resource);
 		let modelData = this._models[modelId];
 		if (!modelData) {
@@ -283,16 +285,16 @@ export class ModelServiceImpl implements IModelService {
 		return modelData.model;
 	}
 
-	public get onModelAdded(): EventProvider<(model:EditorCommon.IModel)=>void> {
-		return this._onModelAdded ? this._onModelAdded.value : null;
+	public get onModelAdded(): Event<EditorCommon.IModel> {
+		return this._onModelAdded ? this._onModelAdded.event : null;
 	}
 
-	public get onModelRemoved(): EventProvider<(model:EditorCommon.IModel)=>void> {
-		return this._onModelRemoved ? this._onModelRemoved.value : null;
+	public get onModelRemoved(): Event<EditorCommon.IModel> {
+		return this._onModelRemoved ? this._onModelRemoved.event : null;
 	}
 
-	public get onModelModeChanged(): EventProvider<(model:EditorCommon.IModel, oldModeId:string)=>void> {
-		return this._onModelModeChanged ? this._onModelModeChanged.value : null;
+	public get onModelModeChanged(): Event<{ model: EditorCommon.IModel; oldModeId: string; }> {
+		return this._onModelModeChanged ? this._onModelModeChanged.event : null;
 	}
 
 	// --- end IModelService
@@ -362,7 +364,7 @@ export class ModelServiceImpl implements IModelService {
 						// Forward mode change to all the workers
 						this._workerHelper.$_acceptDidChangeModelMode(modelData.getModelId(), modeChangedEvent.oldMode.getId(), modeChangedEvent.newMode.getId());
 					}
-					this._onModelModeChanged.fire(modelData.model, modeChangedEvent.oldMode.getId());
+					this._onModelModeChanged.fire({ model: modelData.model, oldModeId: modeChangedEvent.oldMode.getId() });
 					break;
 			}
 		}
@@ -426,7 +428,7 @@ export class ModelServiceWorkerHelper {
 		});
 	}
 
-	public $_acceptDidDisposeModel(url:URL): void {
+	public $_acceptDidDisposeModel(url:URI): void {
 		let model = <MirrorModel>this._resourceService.get(url);
 		this._resourceService.remove(url);
 		if (model) {
@@ -435,7 +437,7 @@ export class ModelServiceWorkerHelper {
 	}
 
 	public $_acceptModelEvents(modelId: string, events:IMirrorModelEvents): void {
-		let model = <MirrorModel>this._resourceService.get(new URL(modelId));
+		let model = <MirrorModel>this._resourceService.get(URI.parse(modelId));
 		if (!model) {
 			throw new Error('Received model events for missing model ' + anonymize(modelId));
 		}

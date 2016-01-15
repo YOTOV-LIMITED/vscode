@@ -11,7 +11,7 @@ import objects = require('vs/base/common/objects');
 import uuid = require('vs/base/common/uuid');
 import nls = require('vs/nls');
 import strings = require('vs/base/common/strings');
-import { IRawFileStatus, IHead, ITag, IBranch, GitErrorCodes } from 'vs/workbench/parts/git/common/git';
+import { IRawFileStatus, IHead, ITag, IBranch, IRemote, GitErrorCodes, IPushOptions } from 'vs/workbench/parts/git/common/git';
 import { detectMimesFromStream } from 'vs/base/node/mime'
 import files = require('vs/platform/files/common/files');
 import { spawn, ChildProcess } from 'child_process';
@@ -26,12 +26,12 @@ export interface IExecutionResult {
 function exec(child: ChildProcess, encoding = 'utf8'): TPromise<IExecutionResult> {
 	const disposables: IDisposable[] = [];
 
-	const once = (ee: EventEmitter, name: string, fn: Function) => {
+	const once = (ee: NodeJS.EventEmitter, name: string, fn: Function) => {
 		ee.once(name, fn);
 		disposables.push(toDisposable(() => ee.removeListener(name, fn)));
 	};
 
-	const on = (ee: EventEmitter, name: string, fn: Function) => {
+	const on = (ee: NodeJS.EventEmitter, name: string, fn: Function) => {
 		ee.on(name, fn);
 		disposables.push(toDisposable(() => ee.removeListener(name, fn)));
 	};
@@ -44,12 +44,12 @@ function exec(child: ChildProcess, encoding = 'utf8'): TPromise<IExecutionResult
 		new TPromise<string>(c => {
 			let buffers: Buffer[] = [];
 			on(child.stdout, 'data', b => buffers.push(b));
-			once(child.stdout, 'close', () => c(Buffer.concat(buffers).toString(encoding)));
+			once(child.stdout, 'close', () => c(iconv.decode(Buffer.concat(buffers), encoding)));
 		}),
 		new TPromise<string>(c => {
 			let buffers: Buffer[] = [];
 			on(child.stderr, 'data', b => buffers.push(b));
-			once(child.stderr, 'close', () => c(Buffer.concat(buffers).toString(encoding)));
+			once(child.stderr, 'close', () => c(iconv.decode(Buffer.concat(buffers), encoding)));
 		})
 	]).then(values => {
 		disposeAll(disposables);
@@ -506,8 +506,11 @@ export class Repository {
 		});
 	}
 
-	public pull(): Promise {
-		return this.run(['pull']).then(null, (err: GitError) => {
+	public pull(rebase?: boolean): Promise {
+		const args = ['pull'];
+		rebase && args.push('-r');
+
+		return this.run(args).then(null, (err: GitError) => {
 			if (/^CONFLICT \([^)]+\): \b/m.test(err.stdout)) {
 				err.gitErrorCode = GitErrorCodes.Conflict;
 			} else if (/Please tell me who you are\./.test(err.stderr)) {
@@ -522,8 +525,13 @@ export class Repository {
 		});
 	}
 
-	public push(): Promise {
-		return this.run(['push']).then(null, (err: GitError) => {
+	public push(remote?: string, name?: string, options?:IPushOptions): Promise {
+		const args = ['push'];
+		options && options.setUpstream && args.push('-u');
+		remote && args.push(remote);
+		name && args.push(name);
+
+		return this.run(args).then(null, (err: GitError) => {
 			if (/^error: failed to push some refs to\b/m.test(err.stderr)) {
 				err.gitErrorCode = GitErrorCodes.PushRejected;
 			} else if (/Could not read from remote repository/.test(err.stderr)) {
@@ -619,6 +627,16 @@ export class Repository {
 				.map(b => b.trim().split(' '))
 				.map(a => ({ name: a[0], commit: a[1] }));
 		});
+	}
+
+	public getRemotes(): TPromise<IRemote[]> {
+		return this.run(['remote'], { log: false })
+			.then(result => result.stdout
+				.trim()
+				.split('\n')
+				.filter(b => !!b)
+				.map(name => ({ name }))
+			);
 	}
 
 	public getBranch(branch: string): TPromise<IBranch> {

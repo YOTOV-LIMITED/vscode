@@ -9,11 +9,10 @@ import * as assert from 'assert';
 import {Promise } from 'vs/base/common/winjs.base';
 import * as Strings from 'vs/base/common/strings';
 import URI from 'vs/base/common/uri';
-import {URL} from 'vs/base/common/network';
-import {StringEditorInput} from 'vs/workbench/browser/parts/editor/stringEditorInput';
-import {LogEditorInput} from 'vs/workbench/browser/parts/editor/logEditorInput';
-import {ResourceEditorInput} from 'vs/workbench/browser/parts/editor/resourceEditorInput';
-import {ResourceEditorModel} from 'vs/workbench/browser/parts/editor/resourceEditorModel';
+import {StringEditorInput} from 'vs/workbench/common/editor/stringEditorInput';
+import {LogEditorInput} from 'vs/workbench/common/editor/logEditorInput';
+import {ResourceEditorInput} from 'vs/workbench/common/editor/resourceEditorInput';
+import {ResourceEditorModel} from 'vs/workbench/common/editor/resourceEditorModel';
 import {TestWorkspace, TestEditorService, MockRequestService} from 'vs/workbench/test/browser/servicesTestUtils';
 import * as InstantiationService from 'vs/platform/instantiation/common/instantiationService';
 import {createMockModelService, createMockModeService} from 'vs/editor/test/common/servicesTestUtils';
@@ -132,7 +131,7 @@ suite("Workbench - StringEditorInput", () => {
 		});
 
 		let resource = URI.create('inMemory', null, 'thePath');
-		let model = modelService.createModel('function test() {}', modeService.getOrCreateMode('text'), URL.fromUri(resource));
+		let model = modelService.createModel('function test() {}', modeService.getOrCreateMode('text'), resource);
 		let input:ResourceEditorInput = inst.createInstance(ResourceEditorInput, 'The Name', 'The Description', resource);
 
 		input.resolve().then((model:ResourceEditorModel) => {

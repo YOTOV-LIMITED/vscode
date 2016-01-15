@@ -8,6 +8,7 @@
 			"id": "xml",
 			"extensions": [
 				".ascx",
+				".atom",
 				".axml",
 				".bpmn",
 				".config",
@@ -24,7 +25,6 @@
 				".iml",
 				".isml",
 				".jmx",
-				".jsp",
 				".launch",
 				".menu",
 				".mxml",
@@ -59,7 +59,8 @@
 				".xml",
 				".xpdl",
 				".xsd",
-				".xul"
+				".xul",
+				".xoml"
 			],
 			"firstLine" : "(\\<\\?xml.*)|(\\<svg)|(\\<\\!doctype\\s+svg)",
 			"aliases": [ "XML", "xml" ],

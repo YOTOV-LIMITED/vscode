@@ -3,29 +3,29 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import nls = require('vs/nls');
 import uri from 'vs/base/common/uri';
 import { TPromise, Promise } from 'vs/base/common/winjs.base';
 import ee = require('vs/base/common/eventEmitter');
 import severity from 'vs/base/common/severity';
 import { createDecorator, ServiceIdentifier } from 'vs/platform/instantiation/common/instantiation';
 import editor = require('vs/editor/common/editorCommon');
+import editorbrowser = require('vs/editor/browser/editorBrowser');
 import { Source } from 'vs/workbench/parts/debug/common/debugSource';
 
 export var VIEWLET_ID = 'workbench.view.debug';
 export var DEBUG_SERVICE_ID = 'debugService';
 export var CONTEXT_IN_DEBUG_MODE = 'inDebugMode';
 
-// Raw
+// raw
 
 export interface IRawModelUpdate {
 	threadId: number;
 	thread?: DebugProtocol.Thread;
 	callStack?: DebugProtocol.StackFrame[];
-	exception?: boolean;
+	stoppedReason?: string;
 }
 
-// Model
+// model
 
 export interface ITreeElement {
 	getId(): string;
@@ -45,7 +45,7 @@ export interface IThread extends ITreeElement {
 	threadId: number;
 	name: string;
 	callStack: IStackFrame[];
-	exception: boolean;
+	stoppedReason: string;
 }
 
 export interface IScope extends IExpressionContainer {
@@ -67,11 +67,19 @@ export interface IEnablement extends ITreeElement {
 	enabled: boolean;
 }
 
+export interface IRawBreakpoint {
+	uri: uri;
+	lineNumber: number;
+	enabled: boolean;
+	condition?: string;
+}
+
 export interface IBreakpoint extends IEnablement {
 	source: Source;
 	lineNumber: number;
 	desiredLineNumber: number;
 	condition: string;
+	verified: boolean;
 }
 
 export interface IFunctionBreakpoint extends IEnablement {
@@ -82,7 +90,7 @@ export interface IExceptionBreakpoint extends IEnablement {
 	name: string;
 }
 
-// Events
+// events
 
 export var ModelEvents = {
 	BREAKPOINTS_UPDATED: 'BreakpointsUpdated',
@@ -110,7 +118,7 @@ export var SessionEvents = {
 	OUTPUT: 'output'
 };
 
-// Model interfaces
+// model interfaces
 
 export interface IViewModel extends ee.EventEmitter {
 	getFocusedStackFrame(): IStackFrame;
@@ -120,7 +128,7 @@ export interface IViewModel extends ee.EventEmitter {
 }
 
 export interface IModel extends ee.IEventEmitter, ITreeElement {
-	getThreads(): { [reference: number]: IThread; };
+	getThreads(): { [threadId: number]: IThread; };
 	getBreakpoints(): IBreakpoint[];
 	areBreakpointsActivated(): boolean;
 	getFunctionBreakpoints(): IFunctionBreakpoint[];
@@ -129,7 +137,7 @@ export interface IModel extends ee.IEventEmitter, ITreeElement {
 	getReplElements(): ITreeElement[];
 }
 
-// Service enums
+// service enums
 
 export enum State {
 	Disabled,
@@ -139,33 +147,32 @@ export enum State {
 	Running
 }
 
-// Service interfaces
+// service interfaces
 
 export interface IGlobalConfig {
 	version: string;
-	debugServer: number;
+	debugServer?: number;
 	configurations: IConfig[];
 }
 
 export interface IConfig {
-	name: string;
+	name?: string;
 	type: string;
 	request: string;
-	program: string;
-	stopOnEntry: boolean;
-	args: string[];
-	cwd: string;
-	runtimeExecutable: string;
-	runtimeArgs: string[];
-	env: { [key: string]: string; };
-	sourceMaps: boolean;
-	outDir: string;
-	address: string;
-	port: number;
-	preLaunchTask: string;
-	externalConsole: boolean;
-	debugServer: number;
-	extensionHostData: any;
+	program?: string;
+	stopOnEntry?: boolean;
+	args?: string[];
+	cwd?: string;
+	runtimeExecutable?: string;
+	runtimeArgs?: string[];
+	env?: { [key: string]: string; };
+	sourceMaps?: boolean;
+	outDir?: string;
+	address?: string;
+	port?: number;
+	preLaunchTask?: string;
+	externalConsole?: boolean;
+	debugServer?: number;
 }
 
 export interface IRawEnvAdapter {
@@ -182,13 +189,15 @@ export interface IRawAdapter extends IRawEnvAdapter {
 	configurationAttributes?: any;
 	initialConfigurations?: any[];
 	win?: IRawEnvAdapter;
+	windows?: IRawEnvAdapter;
 	osx?: IRawEnvAdapter;
 	linux?: IRawEnvAdapter;
 }
 
 export interface IRawDebugSession extends ee.EventEmitter {
 	getType(): string;
-	disconnect(restart?: boolean): TPromise<DebugProtocol.DisconnectResponse>;
+	isAttach: boolean;
+	disconnect(restart?: boolean, force?: boolean): TPromise<DebugProtocol.DisconnectResponse>;
 
 	next(args: DebugProtocol.NextArguments): TPromise<DebugProtocol.NextResponse>;
 	stepIn(args: DebugProtocol.StepInArguments): TPromise<DebugProtocol.StepInResponse>;
@@ -208,20 +217,21 @@ export interface IDebugService extends ee.IEventEmitter {
 	getState(): State;
 	canSetBreakpointsIn(model: editor.IModel, lineNumber: number): boolean;
 
-	getConfiguration(): IConfig;
+	getConfigurationName(): string;
 	setConfiguration(name: string): Promise;
 	openConfigFile(sideBySide: boolean): TPromise<boolean>;
 	loadLaunchConfig(): TPromise<IGlobalConfig>;
 
 	setFocusedStackFrameAndEvaluate(focusedStackFrame: IStackFrame): void;
 
-	setBreakpointsForModel(modelUri: uri, data: { lineNumber: number; enabled: boolean; condition: string }[]): Promise;
-	toggleBreakpoint(modelUri: uri, lineNumber: number, condition?: string): Promise;
+	setBreakpointsForModel(modelUri: uri, data: IRawBreakpoint[]): Promise;
+	toggleBreakpoint(IRawBreakpoint): Promise;
 	enableOrDisableAllBreakpoints(enabled: boolean): Promise;
 	toggleEnablement(element: IEnablement): Promise;
-	removeBreakpoints(modelUri?: uri): Promise;
 	toggleBreakpointsActivated(): Promise;
+	removeAllBreakpoints(): Promise;
 	sendAllBreakpoints(): Promise;
+	editBreakpoint(editor: editorbrowser.ICodeEditor, lineNumber: number): Promise;
 
 	addFunctionBreakpoint(functionName?: string): Promise;
 	renameFunctionBreakpoint(id: string, newFunctionName: string): Promise;
@@ -241,6 +251,7 @@ export interface IDebugService extends ee.IEventEmitter {
 
 	createSession(): Promise;
 	restartSession(): Promise;
+	rawAttach(port: number): Promise;
 	getActiveSession(): IRawDebugSession;
 
 	getModel(): IModel;
@@ -250,9 +261,9 @@ export interface IDebugService extends ee.IEventEmitter {
 	revealRepl(inBackground?:boolean): Promise;
 }
 
-// Utils
+// utils
 
-var _formatPIIRegexp = /{([^}]+)}/g;
+const _formatPIIRegexp = /{([^}]+)}/g;
 
 export function formatPII(value:string, excludePII: boolean, args: {[key: string]: string}): string {
 	return value.replace(_formatPIIRegexp, function(match, group) {

@@ -48,16 +48,16 @@ import { IModel } from 'vs/editor/common/editorCommon';
 import { IModeService } from 'vs/editor/common/services/modeService';
 import { IModelService } from 'vs/editor/common/services/modelService';
 
-import jsonContributionRegistry = require('vs/languages/json/common/jsonContributionRegistry');
+import jsonContributionRegistry = require('vs/platform/jsonschemas/common/jsonContributionRegistry');
 import { IJSONSchema } from 'vs/base/common/jsonSchema';
 
 import { IWorkbenchContribution, IWorkbenchContributionsRegistry, Extensions as WorkbenchExtensions } from 'vs/workbench/common/contributions';
 
-import workbenchActionRegistry = require('vs/workbench/browser/actionRegistry');
+import workbenchActionRegistry = require('vs/workbench/common/actionRegistry');
 import statusbar = require('vs/workbench/browser/parts/statusbar/statusbar');
 import QuickOpen = require('vs/workbench/browser/quickopen');
 
-import { IQuickOpenService } from 'vs/workbench/services/quickopen/browser/quickOpenService';
+import { IQuickOpenService } from 'vs/workbench/services/quickopen/common/quickOpenService';
 import { IWorkbenchEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { IWorkspaceContextService } from 'vs/workbench/services/workspace/common/contextService';
 
@@ -460,6 +460,7 @@ class TaskService extends EventEmitter implements ITaskService {
 	private _taskSystemPromise: TPromise<ITaskSystem>;
 	private _taskSystem: ITaskSystem;
 	private taskSystemListeners: ListenerUnbind[];
+	private clearTaskSystemPromise: boolean;
 
 	private fileChangesListener: ListenerUnbind;
 
@@ -487,10 +488,15 @@ class TaskService extends EventEmitter implements ITaskService {
 		this.pluginService = pluginService;
 
 		this.taskSystemListeners = [];
+		this.clearTaskSystemPromise = false;
 		this.configurationService.addListener(ConfigurationServiceEventTypes.UPDATED, () => {
 			this.emit(TaskServiceEvents.ConfigChanged);
-			this._taskSystem = null;
-			this._taskSystemPromise = null;
+			if (this._taskSystem && this._taskSystem.isActiveSync()) {
+				this.clearTaskSystemPromise = true;
+			} else {
+				this._taskSystem = null;
+				this._taskSystemPromise = null;
+			}
 			this.disposeTaskSystemListeners();
 		});
 
@@ -502,7 +508,7 @@ class TaskService extends EventEmitter implements ITaskService {
 		this.taskSystemListeners = [];
 	}
 
-	private disposeFleChangesListener(): void {
+	private disposeFileChangesListener(): void {
 		if (this.fileChangesListener) {
 			this.fileChangesListener();
 			this.fileChangesListener = null;
@@ -664,7 +670,13 @@ class TaskService extends EventEmitter implements ITaskService {
 							}
 						});
 					}
-					return runResult.promise;
+					return runResult.promise.then((value) => {
+						if (this.clearTaskSystemPromise) {
+							this._taskSystemPromise = null;
+							this.clearTaskSystemPromise = false;
+						}
+						return value;
+					});
 				}, (err: any) => {
 					this.handleError(err);
 				});
@@ -684,8 +696,12 @@ class TaskService extends EventEmitter implements ITaskService {
 					return taskSystem.terminate();
 				}).then(response => {
 					if (response.success) {
+						if (this.clearTaskSystemPromise) {
+							this._taskSystemPromise = null;
+							this.clearTaskSystemPromise = false;
+						}
 						this.emit(TaskServiceEvents.Terminated, {});
-						this.disposeFleChangesListener();
+						this.disposeFileChangesListener();
 					}
 					return response;
 				});
@@ -699,15 +715,15 @@ class TaskService extends EventEmitter implements ITaskService {
 
 	public beforeShutdown(): boolean | TPromise<boolean> {
 		if (this._taskSystem && this._taskSystem.isActiveSync()) {
-			if (this.messageService.confirm({
+			if (this._taskSystem.canAutoTerminate() || this.messageService.confirm({
 				message: nls.localize('TaskSystem.runningTask', 'There is a task running. Do you want to terminate it?'),
-				primaryButton: nls.localize('TaskSystem.terminateTask', "Terminate Task")
+				primaryButton: nls.localize('TaskSystem.terminateTask', "&&Terminate Task")
 			})) {
 				return this._taskSystem.terminate().then((response) => {
 					if (response.success) {
 						this.emit(TaskServiceEvents.Terminated, {});
 						this._taskSystem = null;
-						this.disposeFleChangesListener();
+						this.disposeFileChangesListener();
 						this.disposeTaskSystemListeners();
 						return false; // no veto
 					}
@@ -947,7 +963,7 @@ if (Env.enableTasks) {
 						},
 						'owner': {
 							'type': 'string',
-							'description': nls.localize('JsonSchema.problemMatcher.owner', 'The owner of the problem inside Visual Studio Code. Can be omitted if base is specified. Defaults to \'external\' if omitted and base is not specified.')
+							'description': nls.localize('JsonSchema.problemMatcher.owner', 'The owner of the problem inside Code. Can be omitted if base is specified. Defaults to \'external\' if omitted and base is not specified.')
 						},
 						'severity': {
 							'type': 'string',
@@ -1040,7 +1056,7 @@ if (Env.enableTasks) {
 							'properties': {
 								'cwd': {
 									'type': 'string',
-									'description': nls.localize('JsonSchema.options.cwd', 'The current working directory of the executed program or script. If omitted Visual Studio Code\'s current workspace root is used.')
+									'description': nls.localize('JsonSchema.options.cwd', 'The current working directory of the executed program or script. If omitted Code\'s current workspace root is used.')
 								},
 								'env': {
 									'type': 'object',
@@ -1059,6 +1075,11 @@ if (Env.enableTasks) {
 							'type': 'boolean',
 							'description': nls.localize('JsonSchema.watching', 'Whether the executed task is kept alive and is watching the file system.'),
 							'default': true
+						},
+						'promptOnClose': {
+							'type': 'boolean',
+							'description': nls.localize('JsonSchema.promptOnClose', 'Whether the user is prompted when VS Code closes with a running background task.'),
+							'default': false
 						},
 						'echoCommand': {
 							'type': 'boolean',
@@ -1125,12 +1146,12 @@ if (Env.enableTasks) {
 						},
 						'isBuildCommand': {
 							'type': 'boolean',
-							'description': nls.localize('JsonSchema.tasks.build', 'Maps this task to Visual Studio Code\'s default build command.'),
+							'description': nls.localize('JsonSchema.tasks.build', 'Maps this task to Code\'s default build command.'),
 							'default': true
 						},
 						'isTestCommand': {
 							'type': 'boolean',
-							'description': nls.localize('JsonSchema.tasks.test', 'Maps this task to Visual Studio Code\'s default test command.'),
+							'description': nls.localize('JsonSchema.tasks.test', 'Maps this task to Code\'s default test command.'),
 							'default': true
 						},
 						'problemMatcher': {

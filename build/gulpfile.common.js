@@ -7,7 +7,7 @@ var path = require('path');
 var gulp = require('gulp');
 var sourcemaps = require('gulp-sourcemaps');
 var filter = require('gulp-filter');
-var minifyCSS = require('gulp-minify-css');
+var minifyCSS = require('gulp-cssnano');
 var uglify = require('gulp-uglify');
 var es = require('event-stream');
 var concat = require('gulp-concat');
@@ -31,8 +31,7 @@ exports.loaderConfig = function (emptyPaths) {
 		paths: {
 			'vs': 'out-build/vs',
 			'vs/extensions': 'extensions',
-			'vscode': 'empty:',
-			'lib': 'out-build/lib'
+			'vscode': 'empty:'
 		},
 		'vs/text': {
 			paths: {
